@@ -28,10 +28,20 @@ import os
 import re
 import sys
 
-RAIZES_PADRAO = (
-    os.path.expanduser(r"~\.claude\skills"),
-    os.path.expanduser(r"~\.claude\plugins\cache"),
-)
+# O home se resolve em RUNTIME, nunca na importacao: os testes trocam o home
+# para uma pasta temporaria e o scan tem que enxergar a troca. E se monta com
+# os.path.join porque `r"~\.claude"` no Linux nao e caminho, e uma string com
+# contrabarra literal - foi assim que a suite passou verde aqui e vermelha no CI.
+def claude_home():
+    return os.path.join(os.path.expanduser("~"), ".claude")
+
+
+def claude_cache():
+    return os.path.join(claude_home(), "plugins", "cache")
+
+
+def raizes_padrao():
+    return (os.path.join(claude_home(), "skills"), claude_cache())
 
 # Severidade: 'quebra' = a skill referencia algo que não existe em lugar nenhum.
 # 'aviso' = existe, mas o caminho escrito não resolve a partir da skill.
@@ -69,7 +79,8 @@ PASTAS_DE_SAIDA = (
 )
 
 # Fonte de verdade de qual versão de cada plugin o CLI carrega hoje.
-INSTALLED_JSON = os.path.expanduser(r"~\.claude\plugins\installed_plugins.json")
+def caminho_installed_json():
+    return os.path.join(claude_home(), "plugins", "installed_plugins.json")
 
 RE_REF = re.compile(
     r"`([^`\n]{2,160}?)`|\]\(([^)\s]{2,160}?)\)"
@@ -307,7 +318,7 @@ def _semver(nome):
     return tuple(int(x) for x in partes[:4]) if partes else (-1,)
 
 
-def versoes_ativas(installed_json=INSTALLED_JSON):
+def versoes_ativas(installed_json=None):
     """Pasta de versão que o CLI carrega hoje, por plugin em cache.
 
     Fonte de verdade: `installed_plugins.json`. Quando o installPath declarado
@@ -315,6 +326,7 @@ def versoes_ativas(installed_json=INSTALLED_JSON):
     pasta do plugin. Sem esse filtro o scan lê 10 cópias de plugin-exemplo e
     conta o mesmo achado 10 vezes — inclusive em skills já corrigidas.
     """
+    installed_json = installed_json or caminho_installed_json()
     ativos, declarados = set(), set()
     try:
         with open(installed_json, encoding="utf-8") as f:
@@ -330,7 +342,7 @@ def versoes_ativas(installed_json=INSTALLED_JSON):
             if os.path.isdir(p):
                 ativos.add(os.path.normcase(os.path.abspath(p)))
     # fallback: plugin em cache sem installPath vivo → maior versão no disco
-    raiz_cache = os.path.expanduser(r"~\.claude\plugins\cache")
+    raiz_cache = claude_cache()
     if os.path.isdir(raiz_cache):
         for mercado in os.listdir(raiz_cache):
             dm = os.path.join(raiz_cache, mercado)
@@ -397,7 +409,7 @@ def eh_de_terceiro(caminho):
     """
     p = os.path.normcase(os.path.abspath(caminho)).replace("\\", "/")
     raiz_cache = os.path.normcase(os.path.abspath(
-        os.path.expanduser(r"~\.claude\plugins\cache"))).replace("\\", "/")
+        claude_cache())).replace("\\", "/")
     if not p.startswith(raiz_cache + "/"):
         return False
     mercado = p[len(raiz_cache) + 1:].split("/")[0]
@@ -434,7 +446,7 @@ def varrer(raizes, so_ativas=True):
     resultado = {}
     ativos = versoes_ativas() if so_ativas else set()
     raiz_cache = os.path.normcase(
-        os.path.abspath(os.path.expanduser(r"~\.claude\plugins\cache")))
+        os.path.abspath(claude_cache()))
     for raiz in raizes:
         if not os.path.isdir(raiz):
             continue
@@ -459,7 +471,7 @@ def main(argv=None):
                     help="ignora allowlist.json e mostra o acervo cru")
     a = ap.parse_args(argv)
 
-    res = varrer(a.raiz or RAIZES_PADRAO, so_ativas=not a.todas_versoes)
+    res = varrer(a.raiz or raizes_padrao(), so_ativas=not a.todas_versoes)
     if a.quebras:
         res = {k: [x for x in v if x["sev"] == QUEBRA] for k, v in res.items()}
     silenciados, mortas = [], []
