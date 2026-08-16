@@ -1,0 +1,57 @@
+{
+  "_doc": [
+    "Copie este arquivo para declaracoes.json e edite. Ele e DADO, nao codigo:",
+    "o auditor compara o estado observado na conta com o estado desejado daqui.",
+    "declaracoes.json fica fora do git de proposito - o recorte de uma conta",
+    "revela quais repos existem, quais rodam com credencial e quais estao parados.",
+    "",
+    "branch_producao: a branch que publica. Declarada, nunca 'main' presumido.",
+    "serverless:      o repo tem funcao rodando com credencial? Se sim, o",
+    "                 .gitignore precisa cobrir arquivo de segredo.",
+    "site:            o repo deve ter endereco vivo? So aqui o canonical do HTML",
+    "                 e cobrado contra a resposta real do host.",
+    "tem_comando:     ha comando de build/teste para o CI rodar (default true).",
+    "",
+    "excecoes: dispensa UM (repo, invariante), com motivo escrito, e sai impressa",
+    "no relatorio. Excecao que nao casa com repo do recorte derruba a rodada."
+  ],
+
+  "owner": "sua-conta-github",
+
+  "declarado": {
+    "site-principal": {
+      "branch_producao": "main",
+      "serverless": true,
+      "site": true
+    },
+    "site-legado": {
+      "branch_producao": "master",
+      "serverless": false,
+      "site": true
+    },
+    "app-interno": {
+      "branch_producao": "main",
+      "serverless": true,
+      "site": false
+    },
+    "painel-estatico": {
+      "branch_producao": "main",
+      "serverless": true,
+      "site": false,
+      "tem_comando": false
+    }
+  },
+
+  "excecoes": [
+    {
+      "repo": "site-legado",
+      "invariante": "ar",
+      "motivo": "401 e protecao de acesso posta pelo dono, nao acidente"
+    },
+    {
+      "repo": "painel-estatico",
+      "invariante": "ci",
+      "motivo": "publica pasta ja commitada, sem comando de build/teste para rodar"
+    }
+  ]
+}

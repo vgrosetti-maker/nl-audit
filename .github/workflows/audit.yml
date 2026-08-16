@@ -1,0 +1,66 @@
+name: audit
+
+# Executa o auditor (audit_repos.py) sem depender de alguem estar na maquina.
+# Motivo: arquivo de workflow no disco nao prova
+# execucao - so a corrida registrada na API do Actions prova. Este workflow
+# EH a corrida.
+on:
+  schedule:
+    - cron: "0 6 * * *"   # 06:00 UTC todo dia, sozinho
+  workflow_dispatch: {}     # corrida manual, para provar/depurar sem esperar o cron
+  push:
+    branches: [master]
+    paths:
+      - "*.py"
+      - "tests/**"
+      - "allowlist.json"
+      - ".github/workflows/audit.yml"
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Testes primeiro: nao dependem de segredo nenhum, entao um fork ou um PR
+      # de fora ainda prova o codigo mesmo sem acesso aos secrets.
+      - name: Suite de testes do proprio auditor
+        run: python -m unittest discover -s tests
+
+      - name: gh CLI ja vem no runner (confere versao)
+        run: gh --version
+
+      # A conta auditada e DADO, nao codigo: nao mora no repo (ver .gitignore e
+      # declaracoes.example.json). Quem roda a auditoria de verdade guarda o
+      # JSON inteiro como secret NL_AUDIT_DECLARACOES.
+      - name: Materializa declaracoes.json a partir do secret
+        env:
+          DECLARACOES: ${{ secrets.NL_AUDIT_DECLARACOES }}
+        run: |
+          if [ -z "$DECLARACOES" ]; then
+            echo "::error::secret NL_AUDIT_DECLARACOES ausente - o auditor nao tem" \
+                 "estado declarado para comparar. Copie declaracoes.example.json," \
+                 "preencha e rode: gh secret set NL_AUDIT_DECLARACOES < declaracoes.json"
+            exit 2
+          fi
+          printf '%s' "$DECLARACOES" > declaracoes.json
+          python -c "import json;json.load(open('declaracoes.json'))"
+
+      - name: Roda o auditor com o PAT de leitura entre repos
+        env:
+          # PAT classico, escopo "repo" (leitura basta), criado pelo dono do repo e
+          # guardado como secret deste repo. O GITHUB_TOKEN padrao do Actions
+          # so enxerga o proprio repo - nao alcanca os demais repos da conta.
+          # Setup (uma vez, 2 min): https://github.com/settings/tokens ->
+          # generate classic token, escopo "repo" -> `gh secret set
+          # GH_AUDIT_PAT --repo <owner>/<repo>` (cola so no prompt
+          # oculto do terminal, nunca aqui).
+          GH_TOKEN: ${{ secrets.GH_AUDIT_PAT }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::secret GH_AUDIT_PAT ausente - auditor nao pode ler os" \
+                 "demais repos com o GITHUB_TOKEN padrao (escopo so deste repo)." \
+                 "Setup no comentario deste step."
+            exit 2
+          fi
+          python audit_repos.py

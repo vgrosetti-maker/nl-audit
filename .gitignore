@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# A conta auditada e DADO, nao codigo: fica fora do repo publico.
+# Modelo versionado: declaracoes.example.json
+declaracoes.json

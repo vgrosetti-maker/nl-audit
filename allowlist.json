@@ -1,0 +1,23 @@
+{
+  "_doc": "Defeito CONHECIDO de skill de terceiro, declarado para o relatorio servir de gate em zero. Regras duras, aplicadas em codigo: (1) so vale para plugin de terceiro - marketplace marketplace-exemplo e skill de usuario nunca sao silenciados; (2) toda entrada precisa dos 6 campos, com issue upstream ABERTA e data - entrada incompleta derruba o scan em vez de silenciar; (3) entrada que nao casa mais com nenhum achado e denunciada como 'allowlist morta', para o conserto la em cima nao passar despercebido. Ver: python scan_skills.py --sem-allowlist para o acervo cru.",
+  "entradas": [
+    {
+      "plugin": "claude-design-skillstack",
+      "skill": "barba-js",
+      "tipo": "ref-ausente",
+      "detalhe": "examples/",
+      "motivo": "SKILL.md indexa examples/ que nao vem no pacote e nao existe no repo upstream; defeito de documentacao do terceiro, nao nosso",
+      "issue": "https://github.com/freshtechbro/claudedesignskills/issues/8",
+      "data": "2026-08-15"
+    },
+    {
+      "plugin": "claude-design-skillstack",
+      "skill": "lottie-animations",
+      "tipo": "ref-ausente",
+      "detalhe": "examples/",
+      "motivo": "mesmo defeito do barba-js, mesmo plugin: examples/ indexado e inexistente upstream",
+      "issue": "https://github.com/freshtechbro/claudedesignskills/issues/8",
+      "data": "2026-08-15"
+    }
+  ]
+}
