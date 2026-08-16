@@ -51,7 +51,12 @@ python -m unittest discover -s tests
 
 ## CI
 
-`.github/workflows/audit.yml` runs the suite on every push and runs the auditor daily at 06:00 UTC. A check that only runs on the author's laptop is a gate of honour, not a gate.
+Two workflows, split on purpose by what they need:
+
+- `tests.yml` runs the suite on every push and pull request. No secrets, so anyone who clones this repo gets the same result.
+- `audit.yml` runs the auditor itself, daily at 06:00 UTC and on manual dispatch. It needs two account secrets (`GH_AUDIT_PAT`, `NL_AUDIT_DECLARACOES`) and fails loudly when they are missing, rather than reporting a green run over an empty scope.
+
+A check that only runs on the author's laptop is a gate of honour, not a gate.
 
 ## License
 

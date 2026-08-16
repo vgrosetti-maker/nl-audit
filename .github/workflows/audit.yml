@@ -8,13 +8,6 @@ on:
   schedule:
     - cron: "0 6 * * *"   # 06:00 UTC todo dia, sozinho
   workflow_dispatch: {}     # corrida manual, para provar/depurar sem esperar o cron
-  push:
-    branches: [main]
-    paths:
-      - "*.py"
-      - "tests/**"
-      - "allowlist.json"
-      - ".github/workflows/audit.yml"
 
 jobs:
   audit:
