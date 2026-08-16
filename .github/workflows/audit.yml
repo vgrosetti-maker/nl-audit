@@ -9,7 +9,7 @@ on:
     - cron: "0 6 * * *"   # 06:00 UTC todo dia, sozinho
   workflow_dispatch: {}     # corrida manual, para provar/depurar sem esperar o cron
   push:
-    branches: [master]
+    branches: [main]
     paths:
       - "*.py"
       - "tests/**"
