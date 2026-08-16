@@ -434,10 +434,20 @@ class TestAllowlist(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.home = self.tmp.name
-        self._old = os.environ.get("USERPROFILE")
-        os.environ["USERPROFILE"] = self.home
-        self.addCleanup(lambda: os.environ.__setitem__("USERPROFILE", self._old)
-                        if self._old is not None else None)
+        # HOME e USERPROFILE juntos: expanduser("~") le USERPROFILE no Windows e
+        # HOME no Linux. Trocar so um deixa o teste verde na maquina do autor e
+        # vermelho no CI - foi o que aconteceu no primeiro push do repo publico.
+        self._old = {k: os.environ.get(k) for k in ("HOME", "USERPROFILE")}
+        for k in self._old:
+            os.environ[k] = self.home
+        self.addCleanup(self._restaurar_home)
+
+    def _restaurar_home(self):
+        for k, v in self._old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
     def _skill_em(self, mercado, plugin, skill):
         d = os.path.join(self.home, ".claude", "plugins", "cache",
@@ -518,6 +528,6 @@ class TestAllowlist(unittest.TestCase):
             os.path.join(self.tmp.name, "nao-existe.json")), [])
 
     def test_allowlist_do_repo_e_valida(self):
-        os.environ["USERPROFILE"] = self._old or self.home
+        self._restaurar_home()
         entradas = carregar_allowlist()
         self.assertTrue(entradas, "allowlist.json do repo deveria ter as 2 entradas")
