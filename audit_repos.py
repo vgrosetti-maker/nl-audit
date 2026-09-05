@@ -10,8 +10,9 @@ Invariantes de hoje, por repo do recorte:
   2. branch     — o default branch é a branch de produção declarada
   3. gitignore  — repo com função serverless ignora arquivo de segredo
   4. ar         — o endereço canônico do HTML responde 200 no host real
-  5. ci         — repo com comando de build/teste tem workflow que EXECUTOU,
-                  não apenas arquivo de workflow existente
+  5. ci         — repo com comando de build/teste tem workflow cuja última
+                  execução CONCLUIU EM SUCESSO. Executar não é passar: CI que
+                  roda e termina vermelho é gate cego, não prova de nada.
 
 A conta, o recorte e as exceções são DADO, não código: vivem em
 `declaracoes.json` (fora do git). Copie `declaracoes.example.json` e edite.
@@ -32,7 +33,7 @@ EXEMPLO = Path(__file__).with_name("declaracoes.example.json")
 Declaracao = namedtuple("Declaracao", "branch_producao serverless site tem_comando",
                         defaults=(True,))
 Observado = namedtuple("Observado",
-                       "alertas branch_default gitignore canonical status_ar ci_executado",
+                       "alertas branch_default gitignore canonical status_ar ci_conclusao",
                        defaults=(None,))
 
 # O recorte e uma DECISAO, nao a conta inteira. Repo da conta que nao esta declarado
@@ -86,7 +87,7 @@ Linha = namedtuple("Linha", "repo no_recorte alertas branch gitignore canonical 
 Relatorio = namedtuple("Relatorio", "violacoes dispensados linhas")
 
 DESCONHECIDO = Observado(alertas=None, branch_default=None, gitignore=None,
-                         canonical=None, status_ar=None, ci_executado=None)
+                         canonical=None, status_ar=None, ci_conclusao=None)
 
 
 def falta_cobertura(texto):
@@ -169,12 +170,17 @@ def avaliar(repos_da_conta, observado, recorte, declarado, excecoes):
         if not dec.tem_comando:
             julga(nome, "ci", False,
                   "sem comando de build/teste hoje - nada para o CI executar")
+        elif est.ci_conclusao is None:
+            julga(nome, "ci", False,
+                  "execucao do workflow nao observada (gh nao respondeu)",
+                  observou=False)
+        elif est.ci_conclusao == "":
+            julga(nome, "ci", False,
+                  "workflow tem arquivo mas nenhuma execucao concluida registrada")
         else:
-            julga(nome, "ci", est.ci_executado is True,
-                  "execucao do workflow nao observada (gh nao respondeu)"
-                  if est.ci_executado is None else
-                  "workflow tem arquivo mas nenhuma execucao registrada",
-                  observou=est.ci_executado is not None)
+            julga(nome, "ci", est.ci_conclusao == "success",
+                  "ultima execucao do workflow concluiu `%s`, nao `success`"
+                  % est.ci_conclusao)
 
     linhas = []
     for nome in sorted(repos_da_conta):
@@ -217,10 +223,12 @@ def avaliar(repos_da_conta, observado, recorte, declarado, excecoes):
             ci = "?"
         elif not dec.tem_comando:
             ci = "n/a (sem comando)"
-        elif est.ci_executado is None:
+        elif est.ci_conclusao is None:
             ci = "nao observado"
+        elif est.ci_conclusao == "":
+            ci = "nunca executou"
         else:
-            ci = "executou" if est.ci_executado else "nunca executou"
+            ci = est.ci_conclusao
         linhas.append(Linha(nome, True, alertas, branch, gitignore, canonical, ci))
 
     return Relatorio(violacoes=violacoes, dispensados=dispensados, linhas=linhas)
@@ -359,23 +367,33 @@ def status_no_ar(url, timeout=15):
         return None
 
 
-def workflow_executou(repo, owner=OWNER):
-    """True se a Actions API registra pelo menos uma execucao do workflow do repo.
+def ci_ultima_conclusao(repo, owner=OWNER):
+    """Conclusao da ULTIMA execucao concluida do CI do repo, lida da Actions API.
 
-    Pergunta a API, nao o disco: arquivo de workflow existente e commitado nao
-    prova nada por si so, so prova execucao a corrida que de fato aconteceu.
-    Qualquer erro de coleta (gh fora do ar, JSON inesperado) vira None - "nao
-    observado", nunca "nao executou" nem "executou".
+    Pergunta a API, nao o disco: arquivo de workflow commitado nao prova nada.
+    Mas "executou" tambem nao prova - e o buraco que esta funcao fecha. Tres
+    estados, porque executar e passar sao perguntas diferentes:
+      None  -> nao observado (gh nao respondeu / JSON inesperado)
+      ""    -> nenhuma execucao CONCLUIDA registrada
+      str   -> a conclusao em si: "success", "failure", "cancelled", "timed_out"...
+
+    `status=completed` e deliberado: run em andamento tem `conclusion: null` e
+    nao deve derrubar nem absolver ninguem - a pergunta e sobre o ultimo veredito
+    fechado, nao sobre o que esta rodando agora.
     """
-    # "-f" faz o `gh api` tentar POST por padrao; per_page vai na URL, nao em -f,
+    # "-f" faz o `gh api` tentar POST por padrao; os filtros vao na URL, nao em -f,
     # pra manter o GET (o bug real: 404 de metodo errado virava "gh nao respondeu").
-    r = _gh(["api", "repos/%s/%s/actions/runs?per_page=1" % (owner, repo)])
+    r = _gh(["api", "repos/%s/%s/actions/runs?status=completed&per_page=1"
+             % (owner, repo)])
     if r.returncode != 0:
         return None
     try:
-        return json.loads(r.stdout).get("total_count", 0) > 0
+        runs = json.loads(r.stdout).get("workflow_runs") or []
     except (ValueError, AttributeError):
         return None
+    if not runs:
+        return ""
+    return runs[0].get("conclusion") or ""
 
 
 def observar(recorte, conta, declarado=DECLARADO):
@@ -390,7 +408,7 @@ def observar(recorte, conta, declarado=DECLARADO):
                               gitignore=gitignore(nome),
                               canonical=url,
                               status_ar=status_no_ar(url) if url else None,
-                              ci_executado=workflow_executou(nome)
+                              ci_conclusao=ci_ultima_conclusao(nome)
                                            if (dec and dec.tem_comando) else None)
     return obs
 

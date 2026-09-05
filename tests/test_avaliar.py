@@ -14,17 +14,19 @@ GITIGNORE_OK = "node_modules/\n.env\n.env.*\n!.env.example\n"
 
 
 def obs(alertas=True, branch="main", gitignore=GITIGNORE_OK,
-        canonical=None, status_ar=None, ci_executado=True):
+        canonical=None, status_ar=None, ci_conclusao="success"):
     """Estado observado de um repo. Cada campo vira None quando a coleta falhou.
 
     `canonical`: URL declarada no HTML, `""` quando o HTML foi lido e nao declara
     endereco nenhum, None quando nao deu para ler. `status_ar`: status HTTP do
     host como string, None quando o host nao respondeu (DNS, timeout, recusa).
-    `ci_executado`: default True porque a maioria dos cenarios acima nao testa
-    a invariante de CI - so as classes que a nomeiam devem variar isso.
+    `ci_conclusao`: conclusao da ultima corrida CONCLUIDA ("success", "failure",
+    "cancelled"...), `""` quando nao ha corrida concluida, None quando nao deu
+    para observar. Default "success" porque a maioria dos cenarios acima nao
+    testa a invariante de CI - so as classes que a nomeiam devem variar isso.
     """
     return Observado(alertas=alertas, branch_default=branch, gitignore=gitignore,
-                     canonical=canonical, status_ar=status_ar, ci_executado=ci_executado)
+                     canonical=canonical, status_ar=status_ar, ci_conclusao=ci_conclusao)
 
 
 def dec(branch="main", serverless=True, site=False, tem_comando=True):
@@ -362,8 +364,8 @@ class EnderecoNoAr(unittest.TestCase):
 
 class ExecucaoDeCI(unittest.TestCase):
     """Invariante nova #5 (site-principal#8): repo com comando de build/teste tem
-    workflow que EXECUTOU - existir o arquivo `.yml` nao prova nada, so a API de
-    Actions prova.
+    workflow cuja ultima corrida concluiu em SUCESSO. Existir o arquivo `.yml`
+    nao prova nada, e ter executado tambem nao: so o veredito verde prova.
     """
 
     def test_arquivo_de_workflow_sem_execucao_e_violacao_nao_arquivo(self):
@@ -371,24 +373,72 @@ class ExecucaoDeCI(unittest.TestCase):
         zero corrida registrada na conta."""
         r = avaliar(
             repos_da_conta={"painel-interno": "main"},
-            observado={"painel-interno": obs(ci_executado=False)},
+            observado={"painel-interno": obs(ci_conclusao="")},
             recorte=["painel-interno"], declarado={"painel-interno": dec()}, excecoes={},
         )
         self.assertEqual([v.invariante for v in r.violacoes], ["ci"])
         self.assertIn("nenhuma execucao", motivos(r, "ci")[0])
 
-    def test_execucao_registrada_nao_e_violacao(self):
+    def test_execucao_verde_nao_e_violacao(self):
         r = avaliar(
             repos_da_conta={"painel-interno": "main"},
-            observado={"painel-interno": obs(ci_executado=True)},
+            observado={"painel-interno": obs(ci_conclusao="success")},
             recorte=["painel-interno"], declarado={"painel-interno": dec()}, excecoes={},
         )
         self.assertEqual(r.violacoes, [])
 
+    def test_execucao_vermelha_e_violacao(self):
+        """O buraco real que este invariante tinha: o auditor perguntava se o
+        workflow EXECUTOU e dava "ok" para repo com o ultimo build vermelho.
+        Aconteceu de verdade - `motor-conversao` passou 6 dias assim (30/08 a
+        05/09/2026) enquanto o relatorio imprimia "executou"."""
+        r = avaliar(
+            repos_da_conta={"painel-interno": "main"},
+            observado={"painel-interno": obs(ci_conclusao="failure")},
+            recorte=["painel-interno"], declarado={"painel-interno": dec()}, excecoes={},
+        )
+        self.assertEqual([v.invariante for v in r.violacoes], ["ci"])
+        self.assertIn("failure", motivos(r, "ci")[0])
+        self.assertEqual(codigo_saida(r), 1)
+
+    def test_execucao_cancelada_nao_conta_como_verde(self):
+        """`success` e o unico veredito que absolve: cancelled/timed_out sao
+        corrida que terminou sem provar nada."""
+        r = avaliar(
+            repos_da_conta={"a": "main"},
+            observado={"a": obs(ci_conclusao="cancelled")},
+            recorte=["a"], declarado={"a": dec()}, excecoes={},
+        )
+        self.assertEqual([v.invariante for v in r.violacoes], ["ci"])
+        self.assertIn("cancelled", motivos(r, "ci")[0])
+
+    def test_ci_vermelho_com_excecao_declarada_e_dispensado_nao_violacao(self):
+        """Vermelho conhecido e aceito continua saindo impresso, como toda
+        excecao - dispensa nao e silencio."""
+        r = avaliar(
+            repos_da_conta={"a": "main"},
+            observado={"a": obs(ci_conclusao="failure")},
+            recorte=["a"], declarado={"a": dec()},
+            excecoes={("a", "ci"): "build vermelho conhecido, ticket #12 aberto"},
+        )
+        self.assertEqual(r.violacoes, [])
+        self.assertEqual([d.invariante for d in r.dispensados], ["ci"])
+
+    def test_render_mostra_a_conclusao_e_nao_so_que_executou(self):
+        """O relatorio tem que deixar o vermelho legivel na tabela, nao so na
+        lista de violacoes."""
+        r = avaliar(
+            repos_da_conta={"a": "main"},
+            observado={"a": obs(ci_conclusao="failure")},
+            recorte=["a"], declarado={"a": dec()}, excecoes={},
+        )
+        self.assertIn("failure", render(r))
+        self.assertNotIn("executou", render(r).split("VIOLACAO")[0])
+
     def test_execucao_nao_observada_e_violacao_nao_coleta_falha_dispensada(self):
         r = avaliar(
             repos_da_conta={"a": "main"},
-            observado={"a": obs(ci_executado=None)},
+            observado={"a": obs(ci_conclusao=None)},
             recorte=["a"], declarado={"a": dec()},
             excecoes={("a", "ci"): "tentativa de dispensar coleta que falhou"},
         )
