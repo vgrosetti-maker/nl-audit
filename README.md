@@ -58,6 +58,36 @@ Two workflows, split on purpose by what they need:
 
 A check that only runs on the author's laptop is a gate of honour, not a gate.
 
+## Three outcomes, not one red/green
+
+`audit.yml` classifies every run into exactly one of three buckets via
+`classificar_desfecho.py` (unit-tested in `tests/test_classificar_desfecho.py`,
+including the negative case: exit code 2 must never be reported as
+`achado-real`):
+
+- **`achado-real`** — the audited target itself is in violation. Fails the job
+  (red), because this is the one case that should block a deploy.
+- **`falha-de-credencial`** — a secret is missing or expired (`GH_AUDIT_PAT`,
+  `NL_AUDIT_DECLARACOES`). This is the auditor's own infrastructure, not a
+  finding about the target. It does **not** fail the job; it shows as a
+  `::warning::` annotation and in the job summary, so it stays visible without
+  lying that the target broke.
+- **`falha-do-auditor`** — the job itself broke (dependency, syntax, timeout,
+  any exit code `audit_repos.py` didn't itself classify). Same treatment as
+  credential failure: visible, not a false failure of the target.
+
+This repo absorbed `nl-audit-interno` (2026-09-10, archived, not deleted). That
+repo was the original (started 2026-08-10) but was left behind: its own CI
+never had `GH_AUDIT_PAT` configured on itself — the setup instructions in its
+README pointed at setting the secret on *this* repo instead — so it failed
+`falha-de-credencial` on all 10 of its last 10 runs while reporting flat
+`failure`, indistinguishable from a real finding. Every feature it had
+(`audit_repos.py`, `check_exposure.py`, `scan_skills.py`, tests) already existed
+here in a more complete form (generalized paths, `declaracoes.json` externalized
+as data, the `ci` invariant checking the actual conclusion instead of mere
+execution), so nothing needed porting — only the workflow gained the
+three-way triage above.
+
 ## License
 
 MIT. See `LICENSE`.

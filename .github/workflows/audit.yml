@@ -27,19 +27,29 @@ jobs:
       # declaracoes.example.json). Quem roda a auditoria de verdade guarda o
       # JSON inteiro como secret NL_AUDIT_DECLARACOES.
       - name: Materializa declaracoes.json a partir do secret
+        id: declaracoes
         env:
           DECLARACOES: ${{ secrets.NL_AUDIT_DECLARACOES }}
         run: |
           if [ -z "$DECLARACOES" ]; then
-            echo "::error::secret NL_AUDIT_DECLARACOES ausente - o auditor nao tem" \
-                 "estado declarado para comparar. Copie declaracoes.example.json," \
-                 "preencha e rode: gh secret set NL_AUDIT_DECLARACOES < declaracoes.json"
-            exit 2
+            echo "::warning::secret NL_AUDIT_DECLARACOES ausente - falha-de-credencial," \
+                 "nao achado. O auditor nao tem estado declarado para comparar. Copie" \
+                 "declaracoes.example.json, preencha e rode: gh secret set" \
+                 "NL_AUDIT_DECLARACOES < declaracoes.json"
+            echo "falta=1" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
           printf '%s' "$DECLARACOES" > declaracoes.json
           python -c "import json;json.load(open('declaracoes.json'))"
+          echo "falta=0" >> "$GITHUB_OUTPUT"
 
-      - name: Roda o auditor com o PAT de leitura entre repos
+      # Roda o auditor e CLASSIFICA o desfecho em tres baldes distintos, em vez de
+      # sair vermelho para tudo. So achado-real reprova o alvo (job seguinte).
+      # falha-de-credencial e falha-do-auditor ficam visiveis (warning + resumo do
+      # job), mas nao mentem que o ALVO esta quebrado quando quem quebrou foi a
+      # propria infra do auditor.
+      - name: Roda o auditor e classifica o desfecho
+        id: auditoria
         env:
           # PAT classico, escopo "repo" (leitura basta), criado pelo dono do repo e
           # guardado como secret deste repo. O GITHUB_TOKEN padrao do Actions
@@ -49,11 +59,40 @@ jobs:
           # GH_AUDIT_PAT --repo <owner>/<repo>` (cola so no prompt
           # oculto do terminal, nunca aqui).
           GH_TOKEN: ${{ secrets.GH_AUDIT_PAT }}
+          DECLARACOES_FALTOU: ${{ steps.declaracoes.outputs.falta }}
         run: |
-          if [ -z "$GH_TOKEN" ]; then
-            echo "::error::secret GH_AUDIT_PAT ausente - auditor nao pode ler os" \
-                 "demais repos com o GITHUB_TOKEN padrao (escopo so deste repo)." \
-                 "Setup no comentario deste step."
-            exit 2
+          if [ "$DECLARACOES_FALTOU" = "1" ]; then
+            code=2
+          elif [ -z "$GH_TOKEN" ]; then
+            echo "::warning::secret GH_AUDIT_PAT ausente - falha-de-credencial, nao" \
+                 "achado. Auditor nao pode ler os demais repos com o GITHUB_TOKEN" \
+                 "padrao (escopo so deste repo). Setup no comentario do step anterior."
+            code=2
+          else
+            set +e
+            python audit_repos.py
+            code=$?
+            set -e
           fi
-          python audit_repos.py
+          python classificar_desfecho.py "$code" >> "$GITHUB_OUTPUT"
+          python classificar_desfecho.py "$code" --resumo >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Reprova o alvo SOMENTE em achado-real
+        if: steps.auditoria.outputs.desfecho == 'achado-real'
+        run: |
+          echo "::error::achado-real - o alvo auditado esta em violacao de verdade." \
+               "Ver o resumo do job para o detalhe."
+          exit 1
+
+      - name: Sinaliza falha-de-credencial (nao reprova o alvo, mas fica visivel)
+        if: steps.auditoria.outputs.desfecho == 'falha-de-credencial'
+        run: |
+          echo "::warning::FALHA-DE-CREDENCIAL - o auditor nao rodou de verdade." \
+               "Isto e infra do proprio auditor, nunca um achado sobre o alvo."
+
+      - name: Sinaliza falha-do-auditor (nao reprova o alvo, mas precisa de conserto)
+        if: steps.auditoria.outputs.desfecho == 'falha-do-auditor'
+        run: |
+          echo "::warning::FALHA-DO-AUDITOR - o job quebrou (codigo" \
+               "${{ steps.auditoria.outputs.codigo }}). Isto e bug do auditor," \
+               "nunca um achado sobre o alvo."
